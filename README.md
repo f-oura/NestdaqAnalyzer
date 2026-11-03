@@ -3,8 +3,7 @@
 Online analysis tools for the NestDAQ data acquisition system.
 
 > **Status: under development.** The generic part (data format, DAQ health, per-channel monitor, file replay)
-> builds and is tested with generated data. The FairMQ device has not been compiled yet.
-> Experiment-specific monitors (detectors, trigger) are being added.
+> and the E88 monitor build and are tested with generated data. The FairMQ device has not been compiled yet.
 
 ## What it does
 
@@ -17,6 +16,8 @@ in a browser (THttpServer / JSROOT), together with warnings:
 | Summary | status per check (DAQ, channels, detectors, trigger, analyzer), list of warnings, time frames seen by the analyzer |
 | DAQ | time frame flags, words per module and type, heartbeat delimiter flags, missing or repeated heartbeat frames, data rate per module |
 | Channels/&lt;module&gt; | hit pattern, rate, ToT and time within the heartbeat frame for every channel; hot channels and channels that went silent |
+| E88/&lt;detector&gt; | (E88 only) hit pattern per segment and side, ToT, two-ended coincidences and their time difference, time relative to the nearest SC mean time |
+| E88/Trigger | (E88 only) T1 and B2TT record counts and rates, T1 - SC mean time, B2TT record time - T1, event id steps |
 
 The same monitor modules run on any input: a file written by the FileSink (`nda-replay`), or a FairMQ channel
 of the running DAQ (`nda-online-monitor`). See [docs/online-input.md](docs/online-input.md).
@@ -30,6 +31,8 @@ NestdaqAnalyzer/
 │   ├── format/        time frame parsing, TDC word decoding, FileSink reader (no ROOT, no FairMQ)
 │   ├── monitor/       module interface, histogram registry, engine, warnings (ROOT)
 │   └── modules/       generic modules: DaqHealthModule, ChannelModule
+├── experiments/
+│   └── e88/           E88 monitor: parameter files, B2TT records, E88Module
 ├── apps/              nda-replay (reads files, no FairMQ)
 ├── devices/           nda-online-monitor (FairMQ device, built only when FairMQ is found)
 ├── test/              unit tests
@@ -40,7 +43,8 @@ NestdaqAnalyzer/
 └── README.md
 ```
 
-Experiment-specific modules will go to `experiments/<experiment>/`.
+Experiment-specific modules live in `experiments/<experiment>/`. They are only active when their parameters are
+given; their parameter files (detector definition, channel map, settings) are kept outside this repository.
 
 ## Build
 
@@ -75,6 +79,35 @@ build/bin/nda-replay --input run000124.dat --follow --http http:<port> --expect-
 ```
 
 `nda-replay --help` lists all options (sampling, refresh interval, JSON summary, ...).
+
+### Multi-word records
+
+Some boards put records of several 64-bit words into their stream: a header word with its own 6-bit type and a
+word count in bits 49:44, followed by payload words whose upper bits are arbitrary. Give their type with
+`--record-type <type>` so that the payload is not read as TDC or delimiter words (the E88 monitor registers the
+type of its B2TT records itself).
+
+### E88 monitor
+
+```bash
+build/bin/nda-replay --input run000123.dat --param <param dir>/index.txt --http http:<port>
+# or give the files one by one
+build/bin/nda-replay --input run000123.dat --detector-def detectors.txt --channel-map channel-map.txt --settings settings.txt
+```
+
+File formats (whitespace separated text, `#` starts a comment, `#!` lines are directives):
+
+| File | Header | Columns |
+|---|---|---|
+| detector definition | `#! format detector_def v1` | `detector module layer n_segment n_side edges [description]` |
+| channel map | `#! format channel_map v1`, `#! valid_runs <first> <last>` | `fem_ip ch detector module layer segment side name` |
+| settings | `#! format settings v1` | `key value [value ...]` |
+| parameter index | `#! format param_index v1` | `kind first_run last_run required file` (kinds `detector_def`, `channel_map`, `settings`) |
+
+Settings used by the monitor: `tdc_lsb_ns`, `b2tt_data_type`, `sc_pair_window`, `mrpc_pair_window`,
+`t1_search`, `b2tt_search` and `window.<detector>` (range of the time relative to the SC mean time).
+The channel named `T1` is the E88 trigger. Times are formed within one time frame, so coincidences that
+straddle two time frames are lost (T1 and B2TT records are matched across time frames).
 
 ## Notes
 

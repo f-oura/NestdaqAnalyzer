@@ -36,7 +36,10 @@ Options:
 | `--sample` | `1` | process one time frame out of N |
 | `--expect-fem` | (none) | comma-separated module IPs that must send data |
 | `--output-dir` | (none) | directory for the histogram file written at the end of each run |
-| `--monitor-run-number` | `0` | run number used in the output file name |
+| `--monitor-run-number` | `0` | run number used in the output file name and to select the E88 parameters |
+| `--record-type` | (none) | comma-separated 6-bit types of multi-word records |
+| `--e88-param` | (none) | E88 parameter index (enables the E88 monitor) |
+| `--e88-detector-def`, `--e88-channel-map`, `--e88-settings` | (none) | E88 parameter files, override the index |
 
 The NestDAQ topology is stored in redis as endpoints and links (see `script/topology-amq-stb.sh` in
 nestdaq-user-impl). A sketch for T1, **not yet tested**:
