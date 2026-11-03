@@ -1,0 +1,3 @@
+[submodule "external/nestdaq-user-impl"]
+	path = external/nestdaq-user-impl
+	url = https://github.com/spadi-alliance/nestdaq-user-impl.git
