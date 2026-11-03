@@ -57,10 +57,22 @@ target_link_libraries(nda_monitor PUBLIC nda_format ROOT::Core ROOT::RIO ROOT::H
 target_compile_options(nda_monitor PRIVATE ${NDA_WARNINGS})
 
 # ------------------------------------------------------------------------------
+# Experiment-specific modules. Their parameters are given at run time.
+# ------------------------------------------------------------------------------
+add_library(nda_e88 STATIC
+  experiments/e88/Params.cc
+  experiments/e88/E88Module.cc
+  experiments/e88/Setup.cc
+)
+target_include_directories(nda_e88 PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/experiments")
+target_link_libraries(nda_e88 PUBLIC nda_monitor)
+target_compile_options(nda_e88 PRIVATE ${NDA_WARNINGS})
+
+# ------------------------------------------------------------------------------
 # Applications that read files (no FairMQ)
 # ------------------------------------------------------------------------------
 add_executable(nda-replay apps/nda-replay.cc)
-target_link_libraries(nda-replay PRIVATE nda_monitor)
+target_link_libraries(nda-replay PRIVATE nda_e88)
 target_compile_options(nda-replay PRIVATE ${NDA_WARNINGS})
 install(TARGETS nda-replay RUNTIME DESTINATION bin)
 
@@ -100,7 +112,7 @@ endif()
 
 if(_nda_need_fairmq AND NOT NDA_BUILD_DEVICES STREQUAL "OFF")
   add_executable(nda-online-monitor devices/nda-online-monitor.cxx)
-  target_link_libraries(nda-online-monitor PRIVATE nda_monitor FairMQ::FairMQ FairLogger::FairLogger)
+  target_link_libraries(nda-online-monitor PRIVATE nda_e88 FairMQ::FairMQ FairLogger::FairLogger)
   target_compile_options(nda-online-monitor PRIVATE ${NDA_WARNINGS})
   install(TARGETS nda-online-monitor RUNTIME DESTINATION bin)
 endif()
@@ -132,5 +144,8 @@ if(NDA_BUILD_TESTS)
   add_executable(test_modules test/test_modules.cc)
   target_link_libraries(test_modules PRIVATE nda_monitor)
   add_test(NAME modules COMMAND test_modules)
-  set_target_properties(test_format test_modules PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+  add_executable(test_e88 test/test_e88.cc)
+  target_link_libraries(test_e88 PRIVATE nda_e88)
+  add_test(NAME e88 COMMAND test_e88)
+  set_target_properties(test_format test_modules test_e88 PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
 endif()

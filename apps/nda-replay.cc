@@ -20,6 +20,8 @@
 #include <thread>
 #include <vector>
 
+#include "e88/E88Module.hh"
+#include "e88/Setup.hh"
 #include "format/FileReader.hh"
 #include "modules/ChannelModule.hh"
 #include "modules/DaqHealthModule.hh"
@@ -46,6 +48,7 @@ struct Args {
   std::uint64_t maxFrames = 0;
   std::vector<std::uint32_t> expectedFems;
   std::vector<std::uint8_t> recordTypes;
+  nda::e88::ParamOptions e88;
   bool quiet = false;
 };
 
@@ -65,7 +68,13 @@ void Usage() {
                "  --expect-fem LIST     comma-separated module IPs (or 0x ids) that must send data\n"
                "  --record-type T       6-bit word type that starts a multi-word record (word count in [49:44]);\n"
                "                        may be repeated\n"
-               "  --quiet               do not print warnings while running\n";
+               "  --quiet               do not print warnings while running\n"
+               "E88 monitor (enabled by any of these):\n"
+               "  --param INDEX         parameter index (param_index v1), files chosen by the run number\n"
+               "  --detector-def FILE   detector definition (detector_def v1), overrides the index\n"
+               "  --channel-map FILE    channel map (channel_map v1), overrides the index\n"
+               "  --settings FILE       settings (settings v1), overrides the index; b2tt_data_type is\n"
+               "                        registered as a record type\n";
 }
 
 bool ParseArgs(int argc, char** argv, Args& a) {
@@ -120,6 +129,14 @@ bool ParseArgs(int argc, char** argv, Args& a) {
         return false;
       }
       a.recordTypes.push_back(static_cast<std::uint8_t>(t));
+    } else if (k == "--param") {
+      if (!value(a.e88.index)) return false;
+    } else if (k == "--detector-def") {
+      if (!value(a.e88.detectorDef)) return false;
+    } else if (k == "--channel-map") {
+      if (!value(a.e88.channelMap)) return false;
+    } else if (k == "--settings") {
+      if (!value(a.e88.settings)) return false;
     } else if (k == "--expect-fem") {
       if (!value(v)) return false;
       std::stringstream ss(v);
@@ -254,6 +271,20 @@ int main(int argc, char** argv) {
     std::cerr << "nda-replay: " << error << "\n";
     return 1;
   }
+  // The run number in the FileSink header selects the parameters, so open the input first.
+  std::unique_ptr<nda::e88::E88Module> e88;
+  if (args.e88.Given()) {
+    nda::e88::E88Config config;
+    std::vector<std::string> used;
+    if (!nda::e88::LoadConfig(args.e88, reader.Info().runNumber, config, used, error)) {
+      std::cerr << "nda-replay: " << error << "\n";
+      return 1;
+    }
+    for (const auto& f : used) std::cout << "nda-replay: E88 parameters " << f << "\n";
+    if (config.b2ttDataType >= 0) args.recordTypes.push_back(static_cast<std::uint8_t>(config.b2ttDataType));
+    e88 = std::make_unique<nda::e88::E88Module>(std::move(config));
+  }
+
   nda::monitor::HistRegistry registry(server.get());
   nda::monitor::Engine engine(registry, nda::monitor::Engine::Options{args.sampleEvery, args.recordTypes});
   nda::modules::DaqHealthModule::Options daqOptions;
@@ -264,6 +295,7 @@ int main(int argc, char** argv) {
   auto* channelsPtr = channels.get();
   engine.Add(std::move(daq));
   engine.Add(std::move(channels));
+  if (e88) engine.Add(std::move(e88));
   engine.Book();
 
   engine.BeginRun(nda::monitor::RunInfo{reader.Info().runNumber});

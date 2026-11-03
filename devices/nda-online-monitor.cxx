@@ -19,6 +19,8 @@
 #include <string>
 #include <vector>
 
+#include "e88/E88Module.hh"
+#include "e88/Setup.hh"
 #include "modules/ChannelModule.hh"
 #include "modules/DaqHealthModule.hh"
 #include "modules/FemTable.hh"
@@ -38,6 +40,10 @@ struct OptionKey {
   static constexpr const char* OutputDir = "output-dir";
   static constexpr const char* RunNumber = "monitor-run-number";
   static constexpr const char* RecordType = "record-type";
+  static constexpr const char* Param = "e88-param";
+  static constexpr const char* DetectorDef = "e88-detector-def";
+  static constexpr const char* ChannelMap = "e88-channel-map";
+  static constexpr const char* Settings = "e88-settings";
 };
 
 class OnlineMonitor : public fair::mq::Device {
@@ -73,12 +79,31 @@ class OnlineMonitor : public fair::mq::Device {
       while (std::getline(types, item, ',')) {
         if (!item.empty()) engineOptions.recordTypes.push_back(static_cast<std::uint8_t>(std::stoul(item, nullptr, 0) & 0x3F));
       }
+      // The E88 parameters are chosen with the run number given as an option (the parameter files are
+      // read once, when the device is initialized).
+      nda::e88::ParamOptions param;
+      param.index = fConfig->GetProperty<std::string>(OptionKey::Param);
+      param.detectorDef = fConfig->GetProperty<std::string>(OptionKey::DetectorDef);
+      param.channelMap = fConfig->GetProperty<std::string>(OptionKey::ChannelMap);
+      param.settings = fConfig->GetProperty<std::string>(OptionKey::Settings);
+      std::unique_ptr<nda::e88::E88Module> e88;
+      if (param.Given()) {
+        nda::e88::E88Config config;
+        std::vector<std::string> used;
+        std::string error;
+        const auto run = std::stoull(fConfig->GetProperty<std::string>(OptionKey::RunNumber));
+        if (!nda::e88::LoadConfig(param, run, config, used, error)) throw std::runtime_error(error);
+        for (const auto& f : used) LOG(info) << "E88 parameters " << f;
+        if (config.b2ttDataType >= 0) engineOptions.recordTypes.push_back(static_cast<std::uint8_t>(config.b2ttDataType));
+        e88 = std::make_unique<nda::e88::E88Module>(std::move(config));
+      }
       fRegistry = std::make_unique<nda::monitor::HistRegistry>(fServer.get());
       fEngine = std::make_unique<nda::monitor::Engine>(*fRegistry, engineOptions);
       nda::modules::DaqHealthModule::Options daqOptions;
       daqOptions.expectedFems = expected;
       fEngine->Add(std::make_unique<nda::modules::DaqHealthModule>(daqOptions));
       fEngine->Add(std::make_unique<nda::modules::ChannelModule>(nda::modules::ChannelModule::Options{}));
+      if (e88) fEngine->Add(std::move(e88));
       fEngine->Book();
     }
   }
@@ -165,9 +190,13 @@ void addCustomOptions(bpo::options_description& options) {
     (OptionKey::OutputDir, bpo::value<std::string>()->default_value(""),
      "Directory for the histogram file written at the end of each run (empty: none)")
     (OptionKey::RunNumber, bpo::value<std::string>()->default_value("0"),
-     "Run number used in the output file name")
+     "Run number used in the output file name and to select the E88 parameters")
     (OptionKey::RecordType, bpo::value<std::string>()->default_value(""),
-     "Comma-separated 6-bit word types that start multi-word records (word count in bits 49:44)");
+     "Comma-separated 6-bit word types that start multi-word records (word count in bits 49:44)")
+    (OptionKey::Param, bpo::value<std::string>()->default_value(""), "E88 parameter index (param_index v1)")
+    (OptionKey::DetectorDef, bpo::value<std::string>()->default_value(""), "E88 detector definition, overrides the index")
+    (OptionKey::ChannelMap, bpo::value<std::string>()->default_value(""), "E88 channel map, overrides the index")
+    (OptionKey::Settings, bpo::value<std::string>()->default_value(""), "E88 settings, overrides the index");
 }
 
 std::unique_ptr<fair::mq::Device> getDevice(fair::mq::ProgOptions& /*config*/) {
