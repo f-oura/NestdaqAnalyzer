@@ -9,6 +9,7 @@
 #include "format/FileReader.hh"
 #include "format/Frames.hh"
 #include "format/TdcWord.hh"
+#include "format/WordStream.hh"
 
 using namespace nda::format;
 
@@ -127,12 +128,65 @@ void TestFileReader() {
   std::remove(path);
 }
 
+void TestWordStream() {
+  // A 3-word record of type 0x2b whose payload words look like a leading edge and a delimiter.
+  const std::uint64_t header = (std::uint64_t{0x2b} << 58) | (std::uint64_t{3} << 44);
+  const std::uint64_t fakeLeading = ndatest::Leading(1, 2, 3);
+  const std::uint64_t fakeDelimiter = ndatest::Delimiter1(77);
+  std::vector<std::uint64_t> words = {ndatest::Leading(5, 1, 1), header, fakeLeading, fakeDelimiter,
+                                      ndatest::Delimiter1(10), ndatest::Delimiter2(8, 8)};
+  HeartbeatFrameView hbf{words.data(), words.size()};
+  WordStream plain;
+  int leading = 0, delimiters = 0;
+  plain.ForEach(hbf, [&](std::uint64_t w, WordRole, std::size_t) {
+    leading += HeadOf(w) == kLeading;
+    delimiters += HeadOf(w) == kHeartbeat1;
+  });
+  CHECK_EQ(leading, 2);
+  CHECK_EQ(delimiters, 2);
+
+  WordStream records;
+  records.AddRecordType(0x2b);
+  leading = delimiters = 0;
+  int headers = 0, payload = 0;
+  const auto cut = records.ForEach(hbf, [&](std::uint64_t w, WordRole role, std::size_t size) {
+    if (role == WordRole::kRecordHeader) {
+      ++headers;
+      CHECK_EQ(size, std::size_t{3});
+    } else if (role == WordRole::kRecordPayload) {
+      ++payload;
+    } else {
+      leading += HeadOf(w) == kLeading;
+      delimiters += HeadOf(w) == kHeartbeat1;
+    }
+  });
+  CHECK_EQ(cut, std::size_t{0});
+  CHECK_EQ(headers, 1);
+  CHECK_EQ(payload, 2);
+  CHECK_EQ(leading, 1);
+  CHECK_EQ(delimiters, 1);
+
+  // A record announcing 5 words with only 1 payload word before the delimiters: cut short, delimiters kept.
+  const std::uint64_t longHeader = (std::uint64_t{0x2b} << 58) | (std::uint64_t{5} << 44);
+  std::vector<std::uint64_t> shortRecord = {longHeader, fakeLeading, ndatest::Delimiter1(11), ndatest::Delimiter2(16, 16)};
+  delimiters = payload = 0;
+  const auto cut2 = records.ForEach(HeartbeatFrameView{shortRecord.data(), shortRecord.size()},
+                                    [&](std::uint64_t w, WordRole role, std::size_t) {
+                                      payload += role == WordRole::kRecordPayload;
+                                      delimiters += role == WordRole::kWord && HeadOf(w) == kHeartbeat1;
+                                    });
+  CHECK_EQ(cut2, std::size_t{1});
+  CHECK_EQ(payload, 1);
+  CHECK_EQ(delimiters, 1);
+}
+
 }  // namespace
 
 int main() {
   TestWordDecoding();
   TestParse();
   TestFileReader();
+  TestWordStream();
   if (gFailures) {
     std::cerr << gFailures << " check(s) failed\n";
     return 1;

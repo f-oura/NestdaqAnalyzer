@@ -6,6 +6,7 @@
 #include <string>
 
 #include "format/Frames.hh"
+#include "format/WordStream.hh"
 #include "monitor/Warning.hh"
 
 namespace nda::monitor {
@@ -21,6 +22,8 @@ struct FrameContext {
   // False when time frames before this one were skipped (sampling or drops), so that
   // modules do not count the skipped heartbeat frames as missing.
   bool contiguous = true;
+  // How to walk the words of a heartbeat frame (multi-word records). Never null when called by the Engine.
+  const format::WordStream* words = nullptr;
 };
 
 class Module {
@@ -36,6 +39,8 @@ class Module {
   virtual void EndRun() {}
   // Appends the current warnings.
   virtual void Report(WarningList& /*out*/) const {}
+  // Optional JSON object with the main counters, for scripted checks (empty: none).
+  virtual std::string JsonSummary() const { return ""; }
 };
 
 }  // namespace nda::monitor

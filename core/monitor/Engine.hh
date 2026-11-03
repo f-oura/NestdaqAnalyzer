@@ -6,8 +6,10 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "format/WordStream.hh"
 #include "monitor/Module.hh"
 #include "monitor/Warning.hh"
 
@@ -23,6 +25,8 @@ class Engine {
  public:
   struct Options {
     std::uint32_t sampleEvery = 1;  // process one time frame out of this many
+    // 6-bit word types that start multi-word records (word count in bits [49:44] of the header word).
+    std::vector<std::uint8_t> recordTypes;
   };
 
   Engine(HistRegistry& registry, Options options);
@@ -45,10 +49,14 @@ class Engine {
   std::uint64_t Processed() const { return fProcessed; }
   std::uint64_t Malformed() const { return fMalformed; }
   const std::string& LastError() const { return fLastError; }
+  const format::WordStream& Words() const { return fWords; }
+  // (module name, JSON object) for every module that provides a summary.
+  std::vector<std::pair<std::string, std::string>> JsonSummaries() const;
 
  private:
   HistRegistry& fRegistry;
   Options fOptions;
+  format::WordStream fWords;
   std::vector<std::unique_ptr<Module>> fModules;
   std::uint64_t fReceived = 0;
   std::uint64_t fProcessed = 0;

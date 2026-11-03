@@ -68,27 +68,29 @@ ChannelModule::FemData& ChannelModule::Get(std::uint32_t femId, std::uint32_t fe
   return *fData.back();
 }
 
-void ChannelModule::Process(const format::TimeFrameView& tf, const monitor::FrameContext&) {
+void ChannelModule::Process(const format::TimeFrameView& tf, const monitor::FrameContext& ctx) {
+  static const format::WordStream kPlainWords;
+  const format::WordStream& stream = ctx.words ? *ctx.words : kPlainWords;
   for (const auto& stf : tf.subFrames) {
     if (fFems.Find(stf.header->femId) < 0 && fFems.Size() >= fFems.Capacity()) continue;
     auto& d = Get(stf.header->femId, stf.header->femType);
     if (d.kind == format::TdcKind::kUnknown) continue;
     const double unit = format::TdcUnitNs(d.kind);
     for (const auto& hbf : stf.frames) {
-      for (std::size_t i = 0; i < hbf.nWords; ++i) {
-        const std::uint64_t w = hbf.words[i];
+      stream.ForEach(hbf, [&](std::uint64_t w, format::WordRole role, std::size_t) {
+        if (role != format::WordRole::kWord) return;
         const std::uint8_t head = format::HeadOf(w);
         if (head == format::kHeartbeat1) {
           ++d.frames;
-          continue;
+          return;
         }
-        if (head != format::kLeading && head != format::kTrailing) continue;
+        if (head != format::kLeading && head != format::kTrailing) return;
         const auto hit = format::DecodeTdc(w, d.kind);
-        if (static_cast<int>(hit.channel) >= d.nChannels) continue;
+        if (static_cast<int>(hit.channel) >= d.nChannels) return;
         if (!hit.leading) {
           ++d.trailing[hit.channel];
           d.kinds->Fill(kBinTrailing);
-          continue;
+          return;
         }
         ++d.leading[hit.channel];
         d.kinds->Fill(kBinLeading);
@@ -99,7 +101,7 @@ void ChannelModule::Process(const format::TimeFrameView& tf, const monitor::Fram
         } else {
           d.tot->Fill(hit.channel, hit.tot * unit);
         }
-      }
+      });
     }
   }
 }

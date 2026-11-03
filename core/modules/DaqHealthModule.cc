@@ -14,7 +14,7 @@ namespace {
 
 const char* const kKindLabels[DaqHealthModule::kNumKinds] = {
     "leading", "trailing", "delimiter 1", "delimiter 2", "thr. T1 start", "thr. T1 end", "thr. T2 start",
-    "thr. T2 end", "other"};
+    "thr. T2 end", "records", "other"};
 
 enum FrameBin { kBinFrames = 1, kBinMissing, kBinRepeated, kBinFlagged, kBinThrottledStf, kNumFrameBins = 5 };
 enum TfBin { kBinComplete = 1, kBinIncomplete, kBinTimeout, kBinDepthLimit, kBinSourceMismatch, kBinFrameIdMismatch };
@@ -145,13 +145,19 @@ void DaqHealthModule::Process(const format::TimeFrameView& tf, const monitor::Fr
       ++c.throttledStfs;
       fFrames->Fill(fi, kBinThrottledStf);
     }
+    static const format::WordStream kPlainWords;
+    const format::WordStream& stream = ctx.words ? *ctx.words : kPlainWords;
     for (const auto& hbf : stf.frames) {
       ++fTotals.heartbeatFrames;
-      for (std::size_t i = 0; i < hbf.nWords; ++i) {
-        const std::uint64_t w = hbf.words[i];
+      c.recordOverruns += stream.ForEach(hbf, [&](std::uint64_t w, format::WordRole role, std::size_t) {
+        if (role != format::WordRole::kWord) {
+          ++c.words[kKindRecord];
+          if (role == format::WordRole::kRecordHeader) ++c.records;
+          return;
+        }
         const Kind kind = KindOf(format::HeadOf(w));
         ++c.words[kind];
-        if (kind != kKindHeartbeat1) continue;
+        if (kind != kKindHeartbeat1) return;
         const auto d = format::DecodeHeartbeat1(w);
         ++c.frames;
         fFrames->Fill(fi, kBinFrames);
@@ -175,7 +181,7 @@ void DaqHealthModule::Process(const format::TimeFrameView& tf, const monitor::Fr
         }
         c.lastFrame = d.frameNumber;
         c.haveLastFrame = true;
-      }
+      });
     }
   }
   if (idDiffers) {
@@ -189,7 +195,8 @@ void DaqHealthModule::Update() {
     const auto& c = fCounters[i];
     for (int k = 0; k < kNumKinds; ++k) fWords->SetBinContent(i + 1, k + 1, static_cast<double>(c.words[k]));
     const double live = static_cast<double>(c.frames) * format::kHeartbeatFrameSeconds;
-    const double data = static_cast<double>(c.words[kKindLeading] + c.words[kKindTrailing] + c.words[kKindOther]);
+    const double data = static_cast<double>(c.words[kKindLeading] + c.words[kKindTrailing] + c.words[kKindRecord] +
+                                            c.words[kKindOther]);
     fDataRate->SetBinContent(i + 1, live > 0 ? data / live : 0);
   }
 }
@@ -213,6 +220,9 @@ void DaqHealthModule::Report(monitor::WarningList& out) const {
                                 " time frames");
     }
     if (c.missingFrames > 0) add(Severity::kWarning, fem + ": " + std::to_string(c.missingFrames) + " missing heartbeat frames");
+    if (c.recordOverruns > 0) {
+      add(Severity::kWarning, fem + ": " + std::to_string(c.recordOverruns) + " records cut short by the end of the frame");
+    }
     if (c.repeatedFrames > 0) add(Severity::kWarning, fem + ": " + std::to_string(c.repeatedFrames) + " repeated heartbeat frames");
     if (c.flaggedFrames > 0) {
       std::ostringstream os;

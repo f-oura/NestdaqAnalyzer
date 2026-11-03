@@ -33,6 +33,7 @@ class DaqHealthModule : public monitor::Module {
     kKindThrottlingT1End,
     kKindThrottlingT2Start,
     kKindThrottlingT2End,
+    kKindRecord,  // header and payload words of multi-word records
     kKindOther,
     kNumKinds
   };
@@ -44,6 +45,8 @@ class DaqHealthModule : public monitor::Module {
     std::uint64_t repeatedFrames = 0;  // same frame number twice in a row
     std::uint64_t flaggedFrames = 0;   // delimiters with a non-zero flag field
     std::uint64_t throttledStfs = 0;   // sub time frames with a non-zero type
+    std::uint64_t records = 0;         // multi-word records
+    std::uint64_t recordOverruns = 0;  // records cut short by the end of the frame
     std::uint64_t lastSequence = 0;
     std::uint32_t lastFrame = 0;
     bool haveLastFrame = false;

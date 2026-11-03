@@ -45,6 +45,7 @@ struct Args {
   std::uint32_t sampleEvery = 1;
   std::uint64_t maxFrames = 0;
   std::vector<std::uint32_t> expectedFems;
+  std::vector<std::uint8_t> recordTypes;
   bool quiet = false;
 };
 
@@ -62,6 +63,8 @@ void Usage() {
                "  --sample N            process one time frame out of N (default 1)\n"
                "  --max-frames N        stop after N time frames\n"
                "  --expect-fem LIST     comma-separated module IPs (or 0x ids) that must send data\n"
+               "  --record-type T       6-bit word type that starts a multi-word record (word count in [49:44]);\n"
+               "                        may be repeated\n"
                "  --quiet               do not print warnings while running\n";
 }
 
@@ -109,6 +112,14 @@ bool ParseArgs(int argc, char** argv, Args& a) {
     } else if (k == "--max-frames") {
       if (!value(v)) return false;
       a.maxFrames = std::strtoull(v.c_str(), nullptr, 10);
+    } else if (k == "--record-type") {
+      if (!value(v)) return false;
+      const unsigned long t = std::strtoul(v.c_str(), nullptr, 0);
+      if (t > 0x3F) {
+        std::cerr << "bad record type " << v << "\n";
+        return false;
+      }
+      a.recordTypes.push_back(static_cast<std::uint8_t>(t));
     } else if (k == "--expect-fem") {
       if (!value(v)) return false;
       std::stringstream ss(v);
@@ -154,12 +165,16 @@ std::string JsonEscape(const std::string& s) {
 }
 
 void WriteSummary(const std::string& path, const nda::format::FileInfo& info, const nda::monitor::Engine& engine,
-                  const nda::modules::DaqHealthModule& daq, const nda::modules::ChannelModule& ch) {
+                  const nda::modules::DaqHealthModule& daq, const nda::modules::ChannelModule& ch,
+                  const std::vector<std::uint8_t>& recordTypes) {
   using nda::modules::DaqHealthModule;
   std::ofstream os(path);
   const auto& t = daq.GetTotals();
   os << "{\n  \"format\": \"nda-replay-summary-v1\",\n";
   os << "  \"run_number\": " << info.runNumber << ",\n";
+  os << "  \"record_types\": [";
+  for (std::size_t i = 0; i < recordTypes.size(); ++i) os << (i ? ", " : "") << int(recordTypes[i]);
+  os << "],\n";
   os << "  \"filesink_header\": " << (info.hasFileSinkHeader ? "true" : "false") << ",\n";
   os << "  \"filesink_trailer\": " << (info.hasFileSinkTrailer ? "true" : "false") << ",\n";
   os << "  \"received\": " << engine.Received() << ",\n  \"processed\": " << engine.Processed()
@@ -169,12 +184,13 @@ void WriteSummary(const std::string& path, const nda::format::FileInfo& info, co
      << ",\n  \"run_seconds\": " << daq.RunSeconds() << ",\n";
   os << "  \"modules\": [\n";
   const char* kinds[DaqHealthModule::kNumKinds] = {"leading", "trailing", "delimiter1", "delimiter2", "t1_start",
-                                                    "t1_end", "t2_start", "t2_end", "other"};
+                                                    "t1_end", "t2_start", "t2_end", "record", "other"};
   for (int i = 0; i < daq.Fems().Size(); ++i) {
     const auto& c = daq.Counters(i);
     os << "    {\"id\": \"" << nda::modules::FemLabel(daq.Fems().IdAt(i)) << "\", \"frames\": " << c.frames
        << ", \"missing_frames\": " << c.missingFrames << ", \"repeated_frames\": " << c.repeatedFrames
-       << ", \"flagged_frames\": " << c.flaggedFrames << ", \"words\": {";
+       << ", \"flagged_frames\": " << c.flaggedFrames << ", \"records\": " << c.records
+       << ", \"record_overruns\": " << c.recordOverruns << ", \"words\": {";
     for (int k = 0; k < DaqHealthModule::kNumKinds; ++k) os << (k ? ", " : "") << "\"" << kinds[k] << "\": " << c.words[k];
     os << "}}" << (i + 1 < daq.Fems().Size() ? "," : "") << "\n";
   }
@@ -192,7 +208,13 @@ void WriteSummary(const std::string& path, const nda::format::FileInfo& info, co
        << ", \"trailing\": " << trail << ", \"leading_without_tot\": " << d.leadingWithoutTot
        << ", \"active_channels\": " << active << "}" << (i + 1 < ch.NumFems() ? "," : "") << "\n";
   }
-  os << "  ],\n  \"warnings\": [";
+  os << "  ],\n  \"module_summaries\": {";
+  const auto summaries = engine.JsonSummaries();
+  for (std::size_t i = 0; i < summaries.size(); ++i) {
+    os << (i ? "," : "") << "\n    \"" << summaries[i].first << "\": " << summaries[i].second;
+  }
+  os << (summaries.empty() ? "},\n" : "\n  },\n");
+  os << "  \"warnings\": [";
   const auto& ws = engine.Warnings();
   for (std::size_t i = 0; i < ws.size(); ++i) {
     os << (i ? ", " : "") << "\n    {\"check\": \"" << nda::monitor::CheckName(ws[i].check) << "\", \"severity\": \""
@@ -221,18 +243,6 @@ int main(int argc, char** argv) {
     server->SetItemField("/", "_monitoring", std::to_string(static_cast<int>(args.updateSeconds * 1000)).c_str());
   }
 
-  nda::monitor::HistRegistry registry(server.get());
-  nda::monitor::Engine engine(registry, nda::monitor::Engine::Options{args.sampleEvery});
-  nda::modules::DaqHealthModule::Options daqOptions;
-  daqOptions.expectedFems = args.expectedFems;
-  auto daq = std::make_unique<nda::modules::DaqHealthModule>(daqOptions);
-  auto channels = std::make_unique<nda::modules::ChannelModule>(nda::modules::ChannelModule::Options{});
-  auto* daqPtr = daq.get();
-  auto* channelsPtr = channels.get();
-  engine.Add(std::move(daq));
-  engine.Add(std::move(channels));
-  engine.Book();
-
   nda::format::FileReader::Options readerOptions;
   readerOptions.follow = args.follow;
   readerOptions.pollMilliseconds = args.pollMs;
@@ -244,6 +254,18 @@ int main(int argc, char** argv) {
     std::cerr << "nda-replay: " << error << "\n";
     return 1;
   }
+  nda::monitor::HistRegistry registry(server.get());
+  nda::monitor::Engine engine(registry, nda::monitor::Engine::Options{args.sampleEvery, args.recordTypes});
+  nda::modules::DaqHealthModule::Options daqOptions;
+  daqOptions.expectedFems = args.expectedFems;
+  auto daq = std::make_unique<nda::modules::DaqHealthModule>(daqOptions);
+  auto channels = std::make_unique<nda::modules::ChannelModule>(nda::modules::ChannelModule::Options{});
+  auto* daqPtr = daq.get();
+  auto* channelsPtr = channels.get();
+  engine.Add(std::move(daq));
+  engine.Add(std::move(channels));
+  engine.Book();
+
   engine.BeginRun(nda::monitor::RunInfo{reader.Info().runNumber});
   std::cout << "nda-replay: input " << args.input << ", run " << reader.Info().runNumber << "\n";
 
@@ -290,7 +312,7 @@ int main(int argc, char** argv) {
       f.Close();
     }
   }
-  if (!args.summaryJson.empty()) WriteSummary(args.summaryJson, reader.Info(), engine, *daqPtr, *channelsPtr);
+  if (!args.summaryJson.empty()) WriteSummary(args.summaryJson, reader.Info(), engine, *daqPtr, *channelsPtr, args.recordTypes);
 
   if (server && args.keepAlive) {
     std::cout << "nda-replay: serving histograms, stop with Ctrl-C\n";

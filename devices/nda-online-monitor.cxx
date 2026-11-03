@@ -37,6 +37,7 @@ struct OptionKey {
   static constexpr const char* ExpectFem = "expect-fem";
   static constexpr const char* OutputDir = "output-dir";
   static constexpr const char* RunNumber = "monitor-run-number";
+  static constexpr const char* RecordType = "record-type";
 };
 
 class OnlineMonitor : public fair::mq::Device {
@@ -66,9 +67,14 @@ class OnlineMonitor : public fair::mq::Device {
       LOG(info) << "THttpServer started: " << fHttp;
     }
     if (!fEngine) {
+      nda::monitor::Engine::Options engineOptions;
+      engineOptions.sampleEvery = static_cast<std::uint32_t>(sample);
+      std::stringstream types(fConfig->GetProperty<std::string>(OptionKey::RecordType));
+      while (std::getline(types, item, ',')) {
+        if (!item.empty()) engineOptions.recordTypes.push_back(static_cast<std::uint8_t>(std::stoul(item, nullptr, 0) & 0x3F));
+      }
       fRegistry = std::make_unique<nda::monitor::HistRegistry>(fServer.get());
-      fEngine = std::make_unique<nda::monitor::Engine>(*fRegistry,
-                                                       nda::monitor::Engine::Options{static_cast<std::uint32_t>(sample)});
+      fEngine = std::make_unique<nda::monitor::Engine>(*fRegistry, engineOptions);
       nda::modules::DaqHealthModule::Options daqOptions;
       daqOptions.expectedFems = expected;
       fEngine->Add(std::make_unique<nda::modules::DaqHealthModule>(daqOptions));
@@ -158,7 +164,10 @@ void addCustomOptions(bpo::options_description& options) {
      "Comma-separated module IPs (or 0x ids) that must send data")
     (OptionKey::OutputDir, bpo::value<std::string>()->default_value(""),
      "Directory for the histogram file written at the end of each run (empty: none)")
-    (OptionKey::RunNumber, bpo::value<std::string>()->default_value("0"), "Run number used in the output file name");
+    (OptionKey::RunNumber, bpo::value<std::string>()->default_value("0"),
+     "Run number used in the output file name")
+    (OptionKey::RecordType, bpo::value<std::string>()->default_value(""),
+     "Comma-separated 6-bit word types that start multi-word records (word count in bits 49:44)");
 }
 
 std::unique_ptr<fair::mq::Device> getDevice(fair::mq::ProgOptions& /*config*/) {

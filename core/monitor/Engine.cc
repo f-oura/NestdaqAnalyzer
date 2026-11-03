@@ -17,6 +17,7 @@ enum CounterBin { kBinReceived = 1, kBinProcessed, kBinSkipped, kBinMalformed };
 
 Engine::Engine(HistRegistry& registry, Options options) : fRegistry(registry), fOptions(options) {
   if (fOptions.sampleEvery == 0) fOptions.sampleEvery = 1;
+  for (auto head : fOptions.recordTypes) fWords.AddRecordType(head);
 }
 
 Engine::~Engine() {
@@ -68,6 +69,7 @@ bool Engine::Process(const std::uint8_t* data, std::size_t size) {
   FrameContext ctx;
   ctx.sequence = sequence;
   ctx.contiguous = !fGap;
+  ctx.words = &fWords;
   fGap = false;
   for (auto& m : fModules) m->Process(tf, ctx);
   ++fProcessed;
@@ -95,6 +97,15 @@ void Engine::Update() {
 void Engine::EndRun() {
   Update();
   for (auto& m : fModules) m->EndRun();
+}
+
+std::vector<std::pair<std::string, std::string>> Engine::JsonSummaries() const {
+  std::vector<std::pair<std::string, std::string>> out;
+  for (const auto& m : fModules) {
+    auto json = m->JsonSummary();
+    if (!json.empty()) out.emplace_back(m->Name(), std::move(json));
+  }
+  return out;
 }
 
 std::string Engine::WarningText() const {
