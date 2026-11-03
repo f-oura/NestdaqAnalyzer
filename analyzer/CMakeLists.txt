@@ -18,8 +18,7 @@ target_link_libraries(OnlineAnalysisSlicer
 # OnlineAnalysisTFBuilder
 # ------------------------------------------------------------------------------
 # NestdaqUnpacker does not seem to export a library.
-# We compile its sources directly here.
-set(NESTDAQ_UNPACKER_SRC_DIR "/home/unidaq/repos/NestdaqUnpacker/src")
+# We compile its sources directly here (NESTDAQ_UNPACKER_SRC_DIR is set in the top-level CMakeLists.txt).
 
 add_executable(OnlineAnalysisTFBuilder
     OnlineAnalysisTFBuilder.cxx
