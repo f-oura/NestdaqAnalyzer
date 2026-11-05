@@ -3,7 +3,7 @@
 Online analysis tools for the NestDAQ data acquisition system.
 
 > **Status: under development.** The generic part (data format, DAQ health, per-channel monitor, file replay)
-> and the E88 monitor build and are tested with generated data. The FairMQ device has not been compiled yet.
+> and the E88 monitor build and are tested with generated data. The FairMQ device also builds and receives synthetic time frames over an isolated IPC channel. Live DAQ inputs remain untested.
 
 ## What it does
 

@@ -2,7 +2,7 @@
 // received from a channel, for example the "dqm" or "decimator" output of the TimeFrameBuilder.
 //
 // The device is a thin wrapper: the analysis is done by the same modules as nda-replay.
-// NOTE: this file has not been compiled or run yet (FairMQ is not available on the development host).
+// Synthetic time frame reception has been tested with an isolated TFBFilePlayer replay.
 #include <fairmq/runDevice.h>
 
 #include <TFile.h>

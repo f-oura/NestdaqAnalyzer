@@ -56,3 +56,27 @@ For T2 use the `decimator` channel and set `decimation-factor` of the TimeFrameB
 How the device is registered as a NestDAQ service, and how it learns the run number, still has to be checked.
 
 Connecting a device to a running DAQ changes the DAQ topology. Agree on it with the people running the DAQ first.
+
+
+## Isolated device replay
+
+A static FairMQ configuration can replay a FileSink file without Redis or DAQ topology registration.
+Use a private IPC endpoint in a temporary directory, the ZeroMQ transport, and separate process IDs.
+Start the monitor first, then the player in another terminal:
+
+```bash
+nda-online-monitor --id replay-monitor --control static --transport zeromq \
+  --monitor-run-number <run> --output-dir <existing-output-directory> \
+  --channel-config name=in,type=pull,method=bind,address=ipc://<temporary-directory>/frames
+
+TFBFilePlayer --id replay-player --control static --transport zeromq \
+  --in-file <recorded-file> --split 2 --wait 1 \
+  --channel-config name=out,type=push,method=connect,address=ipc://<temporary-directory>/frames
+```
+
+The player exits at EOF. After queued frames have drained, stop the monitor with SIGINT to write its
+histograms. Check its final received/processed/malformed counts and compare the histogram bins with
+`nda-replay` on the same file. This path has been tested with a synthetic file containing one STF
+and one heartbeat frame per TF; more complex layouts and live DAQ inputs still need validation.
+Derived histograms refreshed with `SetBinContent` can have different ROOT `Entries` values because
+refresh counts differ; compare bin contents and errors for these snapshots.

@@ -5,6 +5,8 @@
 // Always include the nestdaq headers through this file.
 #pragma once
 
+#include <cstdio>  // TimeFrameHeader.h uses printf without declaring it.
+
 #pragma pack(push)
 #include "AmQStrTdcData.h"
 #include "FileSinkHeader.h"
